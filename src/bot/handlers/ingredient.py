@@ -62,7 +62,10 @@ class IngredientHandler(BaseHandler):
         self.topic_id = topic_id
         self._has_channel_filter = channel_id is not None
         self._has_topic_filter = topic_id is not None
-        logger.info(f"IngredientHandler initialized (channel_id={channel_id}, topic_id={topic_id})")
+        logger.info(
+            "IngredientHandler initialized "
+            f"(channel_filter={self._has_channel_filter}, topic_filter={self._has_topic_filter})"
+        )
 
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle an image message for ingredient analysis.
@@ -75,20 +78,14 @@ class IngredientHandler(BaseHandler):
             update: Telegram update containing the image message.
             context: Telegram context object.
         """
-        user = update.effective_user
         message = update.effective_message
 
         # Log chat info
         chat = message.chat if message else None
         chat_type = chat.type if chat else "unknown"
         chat_id = chat.id if chat else None
-        chat_title = chat.title if chat else (chat.username if chat else "Private Chat")
 
-        logger.info(
-            f"Received ingredient analysis request from user_id={user.id if user else 'unknown'}, "
-            f"username={user.username if user else 'unknown'}, "
-            f"chat_id={chat_id}, chat_type={chat_type}, chat_title={chat_title}"
-        )
+        logger.info(f"Received ingredient analysis request, chat_type={chat_type}")
 
         if not message or not message.photo:
             logger.warning("No photo detected in update")
@@ -140,23 +137,17 @@ class IngredientHandler(BaseHandler):
         # Check if channel filtering is enabled
         if self._has_channel_filter:
             if chat_id != self.channel_id:
-                logger.info(
-                    f"Ignoring message from chat {chat_id} - "
-                    f"not the configured channel {self.channel_id}"
-                )
+                logger.info("Ignoring message from a chat that is not the configured channel")
                 return False
-            logger.info(f"Processing message from configured channel {chat_id}")
+            logger.info("Processing message from the configured channel")
 
         # Check if topic filtering is enabled (for forum channels)
         if self._has_topic_filter:
             message_topic_id = getattr(message, "message_thread_id", None)
             if message_topic_id != self.topic_id:
-                logger.info(
-                    f"Ignoring message from topic {message_topic_id} - "
-                    f"not the configured topic {self.topic_id}"
-                )
+                logger.info("Ignoring message from a topic that is not the configured topic")
                 return False
-            logger.info(f"Processing message from configured topic {self.topic_id}")
+            logger.info("Processing message from the configured topic")
 
         return True
 
@@ -173,8 +164,7 @@ class IngredientHandler(BaseHandler):
         """
         photo = message.photo[-1]
         logger.info(
-            f"Processing single photo: file_id={photo.file_id}, "
-            f"width={photo.width}, height={photo.height}, "
+            f"Processing single photo: width={photo.width}, height={photo.height}, "
             f"file_size={photo.file_size} bytes"
         )
 
@@ -215,10 +205,7 @@ class IngredientHandler(BaseHandler):
             context: Telegram context object.
         """
         photo = message.photo[-1]
-        logger.info(
-            f"Processing media group image: media_group_id={media_group_id}, "
-            f"file_id={photo.file_id}"
-        )
+        logger.info(f"Processing media group image, file_size={photo.file_size} bytes")
 
         try:
             # Download image
@@ -265,7 +252,7 @@ class IngredientHandler(BaseHandler):
             message_thread_id: Topic ID for forum channels.
             context: Telegram context object.
         """
-        logger.info(f"Processing media group {media_group_id} with {len(images)} images")
+        logger.info(f"Processing media group with {len(images)} images")
 
         # Get cache to retrieve processing message
         cache = self.media_group_manager._caches.get(media_group_id)

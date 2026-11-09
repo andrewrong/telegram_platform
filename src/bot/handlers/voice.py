@@ -47,10 +47,7 @@ class VoiceHandler(BaseHandler):
         self.asr_service = asr_service
         self.allowed_group_ids = set(allowed_group_ids or [])
         self._has_filter = bool(self.allowed_group_ids)
-        logger.info(
-            f"VoiceHandler initialized (filter_enabled={self._has_filter}, "
-            f"allowed_groups={self.allowed_group_ids})"
-        )
+        logger.info(f"VoiceHandler initialized (filter_enabled={self._has_filter})")
 
     async def handle(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle a voice message.
@@ -59,20 +56,14 @@ class VoiceHandler(BaseHandler):
             update: Telegram update containing the voice message.
             context: Telegram context object.
         """
-        user = update.effective_user
         message = update.effective_message
 
         # Log chat info for group ID identification
         chat = message.chat if message else None
         chat_type = chat.type if chat else "unknown"
         chat_id = chat.id if chat else None
-        chat_title = chat.title if chat else (chat.username if chat else "Private Chat")
 
-        logger.info(
-            f"Received voice message from user_id={user.id if user else 'unknown'}, "
-            f"username={user.username if user else 'unknown'}, "
-            f"chat_id={chat_id}, chat_type={chat_type}, chat_title={chat_title}"
-        )
+        logger.info(f"Received voice message, chat_type={chat_type}")
 
         if not message or not message.voice:
             logger.warning("No voice message detected in update")
@@ -94,17 +85,14 @@ class VoiceHandler(BaseHandler):
         # Check if group filtering is enabled
         if self._has_filter:
             if chat_id not in self.allowed_group_ids:
-                logger.info(f"Ignoring message from chat {chat_id} - not in allowed groups")
+                logger.info("Ignoring message from a chat not in allowed groups")
                 return
-            logger.info(f"Processing message from allowed group {chat_id}")
-        logger.info(
-            f"Voice info: file_id={voice.file_id}, duration={voice.duration}s, "
-            f"file_size={voice.file_size} bytes"
-        )
+            logger.info("Processing message from an allowed group")
+        logger.info(f"Voice info: duration={voice.duration}s, file_size={voice.file_size} bytes")
 
         try:
             # Get voice file info
-            logger.info(f"Requesting file info for file_id={voice.file_id}")
+            logger.info("Requesting voice file info")
             file = await context.bot.get_file(voice.file_id)
             logger.info("Got voice file metadata")
 
@@ -143,20 +131,14 @@ class VoiceHandler(BaseHandler):
             update: Telegram update containing the audio file.
             context: Telegram context object.
         """
-        user = update.effective_user
         message = update.effective_message
 
         # Log chat info for group ID identification
         chat = message.chat if message else None
         chat_type = chat.type if chat else "unknown"
         chat_id = chat.id if chat else None
-        chat_title = chat.title if chat else (chat.username if chat else "Private Chat")
 
-        logger.info(
-            f"Received audio file from user_id={user.id if user else 'unknown'}, "
-            f"username={user.username if user else 'unknown'}, "
-            f"chat_id={chat_id}, chat_type={chat_type}, chat_title={chat_title}"
-        )
+        logger.info(f"Received audio file, chat_type={chat_type}")
 
         if not message or not message.audio:
             logger.warning("No audio file detected in update")
@@ -178,20 +160,20 @@ class VoiceHandler(BaseHandler):
         # Check if group filtering is enabled
         if self._has_filter:
             if chat_id not in self.allowed_group_ids:
-                logger.info(f"Ignoring message from chat {chat_id} - not in allowed groups")
+                logger.info("Ignoring message from a chat not in allowed groups")
                 return
-            logger.info(f"Processing message from allowed group {chat_id}")
+            logger.info("Processing message from an allowed group")
 
         file_name = audio.file_name if audio.file_name else "unknown"
         mime_type = audio.mime_type if audio.mime_type else "unknown"
         logger.info(
-            f"Audio info: file_id={audio.file_id}, duration={audio.duration}s, "
+            f"Audio info: duration={audio.duration}s, "
             f"file_size={audio.file_size} bytes, file_name={file_name}, mime_type={mime_type}"
         )
 
         try:
             # Get audio file info
-            logger.info(f"Requesting file info for file_id={audio.file_id}")
+            logger.info("Requesting audio file info")
             file = await context.bot.get_file(audio.file_id)
             logger.info("Got audio file metadata")
 
