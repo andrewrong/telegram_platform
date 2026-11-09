@@ -12,6 +12,7 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, ApplicationHandlerStop
 
+from src.bot.health import start_health_server
 from src.utils.retry import RetryableJobError, is_retryable_error, retry_after_seconds
 
 logger = logging.getLogger(__name__)
@@ -187,21 +188,39 @@ class ReliableUpdateRunner:
     """Poll Telegram only after updates can be durably recorded, then process them."""
 
     def __init__(
-        self, application: Application, database_path: Path, worker_count: int = 2
+        self,
+        application: Application,
+        database_path: Path,
+        worker_count: int = 2,
+        *,
+        health_port: int | None = None,
     ) -> None:
         self.application = application
         self.store = UpdateStore(database_path)
         self.worker_count = worker_count
         self._wake_workers = asyncio.Event()
         self._stopping = False
+        self.health_port = health_port
+        self._health_server: asyncio.Server | None = None
+        self.last_poll_success: float | None = None
+        self._started_at = time.monotonic()
 
     async def run(self) -> None:
+        self._started_at = time.monotonic()
+        if self.health_port is not None:
+            self._health_server = await start_health_server(
+                self.health_port,
+                lambda: (self.last_poll_success, self._started_at, time.monotonic()),
+            )
         await self.application.initialize()
         await self.application.start()
         workers = [asyncio.create_task(self._worker(index)) for index in range(self.worker_count)]
         try:
             await self._poll_forever()
         finally:
+            if self._health_server is not None:
+                self._health_server.close()
+                await self._health_server.wait_closed()
             self._stopping = True
             self._wake_workers.set()
             for worker in workers:
@@ -219,6 +238,7 @@ class ReliableUpdateRunner:
                     timeout=30,
                     allowed_updates=ALLOWED_UPDATES,
                 )
+                self.last_poll_success = time.monotonic()
                 await self.store.ingest(updates)
                 if updates:
                     logger.info("Durably ingested %s Telegram update(s)", len(updates))
