@@ -40,17 +40,25 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+    # Health endpoint, reachable from the host loopback only
+    ports:
+      - "127.0.0.1:28120:28120"
+
     # Network (isolated)
     networks:
       - bot-network
 
     # Health check
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:28120/health', timeout=5).status == 200 else 1)"
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 60s
 
 networks:
   bot-network:
