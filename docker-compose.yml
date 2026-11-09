@@ -2,8 +2,11 @@ version: '3.8'
 
 services:
   telegram-bot:
-    # Pre-built image - use 'make build' to compile first
-    image: telegram-asr-bot:latest
+    # crew sets CREW_IMAGE (<service>:<short sha>) on deploy; a local build keeps the old tag.
+    image: ${CREW_IMAGE:-telegram-asr-bot:latest}
+    build:
+      context: .
+      target: production
     container_name: telegram-asr-bot
     restart: unless-stopped
 
@@ -24,14 +27,14 @@ services:
       - ASR_SERVICE_URL=${ASR_SERVICE_URL_DOCKER:-http://host.docker.internal:28111}
       - OCR_SERVICE_URL=${OCR_SERVICE_URL_DOCKER:-http://host.docker.internal:18100}
 
-    # Mount .env file for configuration
+    # The .env lives in the service directory (crew sets CREW_SERVICE_DIR); never in Git.
     env_file:
-      - .env
+      - ${CREW_SERVICE_DIR:-.}/.env
 
     # Mount logs and the durable update inbox for persistence
     volumes:
-      - ./logs:/app/logs
-      - ./data:/app/data
+      - ${CREW_SERVICE_DIR:-.}/logs:/app/logs
+      - ${CREW_SERVICE_DIR:-.}/data:/app/data
 
     # Network configuration
     extra_hosts:
