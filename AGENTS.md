@@ -35,3 +35,16 @@ Read `CLAUDE.md` first for the toolchain (`uv`, `pytest`, `ruff`) and the workin
 - The `test` workflow runs the tests and, on a pull request, the ratchet. The scheduled run executes the full suite.
 - Commit with the identity the history uses. No secrets, tokens, chat ids or personal data in code, commits,
   fixtures or documents.
+
+## Privacy and tests
+
+This repository is public. Every pull request is reviewed against these rules:
+
+- No secret, token, Telegram chat, group, channel or topic id, user name, personal data, name of a
+  key of the owner's services, host name, IP address or path of the owner's machine in code, tests,
+  fixtures, documentation, commits or pull request text. Fixtures use obvious fakes.
+- Tests talk only to fakes or to servers they start themselves on 127.0.0.1. No test calls the
+  Telegram Bot API, a hosted LLM or OCR API, or the owner's ASR and OCR services.
+- Nothing reads or writes the directory of the installed service or any `.env` file.
+- Nothing changes how the bot token or an API key is read, stored, logged or sent, and no log line
+  prints message text, a chat id or a user id, unless the pull request description says so.
