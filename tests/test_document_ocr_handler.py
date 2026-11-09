@@ -8,7 +8,12 @@ from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
 from src.bot.handlers.document import DocumentOCRHandler, parse_ocr_options
-from src.models.schemas import OCRHealthResponse, OCRModelStatus, OCRProcessResult
+from src.models.schemas import (
+    JinaHealthStatus,
+    OCRHealthResponse,
+    OCRModelStatus,
+    OCRProcessResult,
+)
 from src.services.ocr import OCRService
 from src.utils.retry import is_retryable_error
 
@@ -411,3 +416,27 @@ class TestDocumentOCRHandler:
         assert "✅ paddle" in status_text
         assert "❌ glm" in status_text
         assert "✅ qwen" in status_text
+        assert "仅显式选择" in status_text
+        assert "本地失败后兜底已启用" not in status_text
+
+    @pytest.mark.asyncio
+    async def test_ocr_status_shows_enabled_local_failure_fallback(
+        self,
+        ocr_service: MagicMock,
+        update: MagicMock,
+        context: MagicMock,
+    ) -> None:
+        """Show that the OCR service falls back to Jina after local failure."""
+        ocr_service.health.return_value = OCRHealthResponse(
+            status="ok",
+            ollama=True,
+            jina=JinaHealthStatus(configured=True, reachable=True, fallback_on_local_failure=True),
+            models=[OCRModelStatus(engine="paddle", name="paddle-model", available=True)],
+        )
+        handler = DocumentOCRHandler(ocr_service)
+
+        await handler.show_status(update, context)
+
+        status_text = update.effective_message.reply_text.call_args.args[0]
+        assert "本地失败后兜底已启用" in status_text
+        assert "仅显式选择" not in status_text
