@@ -27,9 +27,10 @@ services:
       - ASR_SERVICE_URL=${ASR_SERVICE_URL_DOCKER:-http://host.docker.internal:28113}
       - OCR_SERVICE_URL=${OCR_SERVICE_URL_DOCKER:-http://host.docker.internal:18100}
 
-    # The .env lives in the service directory (crew sets CREW_SERVICE_DIR); never in Git.
+    # Under crew the file is telegram_platform.env of the secrets directory crew hands as
+    # CREW_SECRETS; a local run (CREW_SECRETS unset) reads ./.env. Never in Git.
     env_file:
-      - ${CREW_SERVICE_DIR:-.}/.env
+      - ${CREW_SECRETS:-.}/${CREW_SECRETS:+telegram_platform}.env
 
     # Mount logs and the durable update inbox for persistence
     volumes:
