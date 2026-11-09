@@ -24,7 +24,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PYTHONPATH=/app
-      - ASR_SERVICE_URL=${ASR_SERVICE_URL_DOCKER:-http://host.docker.internal:28111}
+      - ASR_SERVICE_URL=${ASR_SERVICE_URL_DOCKER:-http://host.docker.internal:28113}
       - OCR_SERVICE_URL=${OCR_SERVICE_URL_DOCKER:-http://host.docker.internal:18100}
 
     # The .env lives in the service directory (crew sets CREW_SERVICE_DIR); never in Git.
