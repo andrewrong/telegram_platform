@@ -47,12 +47,12 @@ def context() -> MagicMock:
     return mocked_context
 
 
-def success_result(text: str = "Recognized text") -> OCRProcessResult:
+def success_result(text: str = "Recognized text", engine: str = "paddle") -> OCRProcessResult:
     """Create a successful OCR result."""
     return OCRProcessResult(
         success=True,
         text=text,
-        engine="paddle",
+        engine=engine,
         pages=1,
         duration_ms=250,
     )
@@ -139,6 +139,56 @@ class TestDocumentOCRHandler:
         if engine == "jina":
             assert "手动重发" in update.effective_message.reply_text.call_args.args[0]
             assert update.effective_message.reply_text.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_auto_request_fulfilled_by_jina_is_not_replayed(
+        self, ocr_service: MagicMock, update: MagicMock, context: MagicMock
+    ) -> None:
+        """Cloud fallback must have the same delivery safety as explicit Jina."""
+        update.effective_message.photo = [
+            MagicMock(spec=PhotoSize, file_id="photo-id", file_size=1024)
+        ]
+        update.effective_message.caption = "#auto"
+        telegram_file = MagicMock()
+        telegram_file.download_as_bytearray = AsyncMock(return_value=b"photo")
+        context.bot.get_file.return_value = telegram_file
+        processing = MagicMock()
+        processing.delete = AsyncMock()
+        update.effective_message.reply_text.side_effect = [processing, TimedOut(), None]
+        ocr_service.process_image.return_value = success_result(engine="jina")
+
+        with pytest.raises(Exception) as caught:
+            await DocumentOCRHandler(ocr_service).handle(update, context)
+
+        assert not is_retryable_error(caught.value)
+        assert "手动重发" in update.effective_message.reply_text.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_auto_request_with_failed_cloud_fallback_is_not_replayed(
+        self, ocr_service: MagicMock, update: MagicMock, context: MagicMock
+    ) -> None:
+        """An uncertain failed fallback may still have incurred hosted usage."""
+        update.effective_message.photo = [
+            MagicMock(spec=PhotoSize, file_id="photo-id", file_size=1024)
+        ]
+        update.effective_message.caption = "#auto"
+        telegram_file = MagicMock()
+        telegram_file.download_as_bytearray = AsyncMock(return_value=b"photo")
+        context.bot.get_file.return_value = telegram_file
+        processing = MagicMock()
+        processing.edit_text = AsyncMock()
+        update.effective_message.reply_text.return_value = processing
+        ocr_service.process_image.return_value = OCRProcessResult(
+            success=False,
+            error="cloud fallback failed",
+            retryable=True,
+            cloud_attempted=True,
+        )
+
+        with pytest.raises(Exception) as caught:
+            await DocumentOCRHandler(ocr_service).handle(update, context)
+
+        assert not is_retryable_error(caught.value)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("stage", ["download", "recognize", "processing", "delete"])

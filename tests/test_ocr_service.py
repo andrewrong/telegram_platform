@@ -137,6 +137,23 @@ class TestOCRService:
                 await ocr_service.recognize_image(b"image")
 
     @pytest.mark.asyncio
+    async def test_marks_failed_cloud_fallback_as_non_replayable(
+        self, ocr_service: OCRService
+    ) -> None:
+        """The API signal survives conversion to a handler-friendly failure result."""
+        response = MagicMock(
+            status_code=502,
+            text='{"error":"local and cloud OCR failed", "cloud_attempted":true}',
+        )
+        with patch.object(ocr_service._client, "post", new_callable=AsyncMock) as mock_post:
+            mock_post.return_value = response
+            result = await ocr_service.process_image(b"image")
+
+        assert not result.success
+        assert result.retryable
+        assert result.cloud_attempted
+
+    @pytest.mark.asyncio
     async def test_wraps_network_error(self, ocr_service: OCRService) -> None:
         """Convert HTTP client failures into the domain exception."""
         with patch.object(ocr_service._client, "post", new_callable=AsyncMock) as mock_post:

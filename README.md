@@ -21,8 +21,10 @@ The caption can select an OCR engine and PDF pages:
 Supported engines are `auto`, `paddle`, `glm`, `qwen`, and explicit `jina`.
 Use `#jina` or `/ocr jina pages=2-7` for Jina OCR. It uploads images/PDF pages to Jina's
 cloud and may incur charges. Configure `OCR_JINA_API_KEY` only in the OCR service's
-private deployment environment, never in Telegram or Git. `auto` stays local, and
-ingredient analysis stays GLM. `/ocr_status` displays Jina configuration and metadata
+private deployment environment, never in Telegram or Git. `auto` stays local unless the OCR
+service operator enables its local-failure Jina fallback; then a page may upload only after every
+local model fails. Ingredient analysis starts with GLM and uses the same configured local chain.
+`/ocr_status` displays Jina configuration, whether the fallback is enabled, and metadata
 reachability, which does not validate the Key or guarantee inference capacity.
 Jina updates are not automatically replayed by the durable queue on failure, including
 result-delivery network failures; manually resend if needed to avoid duplicate cloud charges.

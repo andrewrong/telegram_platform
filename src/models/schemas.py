@@ -54,6 +54,7 @@ class JinaHealthStatus(BaseModel):
 
     configured: bool = False
     reachable: bool = False
+    fallback_on_local_failure: bool = False
 
 
 class OCRHealthResponse(BaseModel):
@@ -77,3 +78,5 @@ class OCRProcessResult(BaseModel):
     pages: int = 0
     duration_ms: int = 0
     retryable: bool = False
+    # A hosted OCR attempt may have incurred usage, even when no result is available.
+    cloud_attempted: bool = False
