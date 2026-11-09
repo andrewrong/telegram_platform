@@ -93,8 +93,11 @@ class OCRService:
 
         if response.status_code >= 400:
             detail = response.text.strip()
+            cloud_attempted = False
             try:
-                detail = str(json.loads(detail).get("error", detail))
+                payload = json.loads(detail)
+                detail = str(payload.get("error", detail))
+                cloud_attempted = bool(payload.get("cloud_attempted", False))
             except (json.JSONDecodeError, AttributeError):
                 pass
             error = OCRServiceError(
@@ -103,6 +106,7 @@ class OCRService:
             # Preserve retryability after translating the HTTP response into the
             # handler-friendly OCRServiceError.
             error.retryable = response.status_code == 429 or response.status_code >= 500
+            error.cloud_attempted = cloud_attempted
             raise error
 
         try:
@@ -181,7 +185,10 @@ class OCRService:
         except OCRServiceError as error:
             logger.error("Image OCR failed: %s", error)
             return OCRProcessResult(
-                success=False, error=str(error), retryable=is_retryable_error(error)
+                success=False,
+                error=str(error),
+                retryable=is_retryable_error(error),
+                cloud_attempted=bool(getattr(error, "cloud_attempted", False)),
             )
 
     async def process_pdf(
@@ -204,7 +211,10 @@ class OCRService:
         except OCRServiceError as error:
             logger.error("PDF OCR failed: %s", error)
             return OCRProcessResult(
-                success=False, error=str(error), retryable=is_retryable_error(error)
+                success=False,
+                error=str(error),
+                retryable=is_retryable_error(error),
+                cloud_attempted=bool(getattr(error, "cloud_attempted", False)),
             )
 
     @staticmethod

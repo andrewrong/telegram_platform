@@ -104,7 +104,8 @@ class DocumentOCRHandler(BaseHandler):
         ]
         cloud = (
             f"Jina 云端 · {'已配置' if health.jina.configured else '未配置'} · "
-            f"{'元数据可达' if health.jina.reachable else '元数据不可达'}"
+            f"{'元数据可达' if health.jina.reachable else '元数据不可达'} · "
+            f"{'本地失败后兜底已启用' if health.jina.fallback_on_local_failure else '仅显式选择'}"
         )
         await message.reply_text(
             "\n".join(
@@ -135,6 +136,7 @@ class DocumentOCRHandler(BaseHandler):
         if engine == "auto":
             engine = self.default_engine
         processing_message: Message | None = None
+        cloud_attempted = engine == "jina"
         try:
             telegram_file = await context.bot.get_file(attachment.file_id)
             file_data = bytes(await telegram_file.download_as_bytearray())
@@ -142,8 +144,9 @@ class DocumentOCRHandler(BaseHandler):
                 "🔍 正在识别 PDF，请稍候..." if attachment.is_pdf else "🔍 正在识别图片，请稍候..."
             )
             result = await self._recognize(attachment, file_data, engine, pages)
+            cloud_attempted = cloud_attempted or result.engine == "jina" or result.cloud_attempted
             if not result.success:
-                if engine == "jina":
+                if cloud_attempted:
                     raise OCRServiceError(result.error)
                 if result.retryable:
                     raise RetryableJobError(result.error)
@@ -154,7 +157,7 @@ class DocumentOCRHandler(BaseHandler):
             processing_message = None
             await self._send_result(message, result)
         except Exception as error:
-            if engine == "jina":
+            if cloud_attempted:
                 await self._notify_cloud_failure(message, processing_message)
                 raise TerminalJobError(
                     "Jina OCR update failed; resend manually to avoid duplicate cloud charges"

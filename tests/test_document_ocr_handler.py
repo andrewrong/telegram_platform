@@ -8,7 +8,12 @@ from telegram.error import TimedOut
 from telegram.ext import ContextTypes
 
 from src.bot.handlers.document import DocumentOCRHandler, parse_ocr_options
-from src.models.schemas import OCRHealthResponse, OCRModelStatus, OCRProcessResult
+from src.models.schemas import (
+    JinaHealthStatus,
+    OCRHealthResponse,
+    OCRModelStatus,
+    OCRProcessResult,
+)
 from src.services.ocr import OCRService
 from src.utils.retry import is_retryable_error
 
@@ -47,12 +52,12 @@ def context() -> MagicMock:
     return mocked_context
 
 
-def success_result(text: str = "Recognized text") -> OCRProcessResult:
+def success_result(text: str = "Recognized text", engine: str = "paddle") -> OCRProcessResult:
     """Create a successful OCR result."""
     return OCRProcessResult(
         success=True,
         text=text,
-        engine="paddle",
+        engine=engine,
         pages=1,
         duration_ms=250,
     )
@@ -139,6 +144,56 @@ class TestDocumentOCRHandler:
         if engine == "jina":
             assert "手动重发" in update.effective_message.reply_text.call_args.args[0]
             assert update.effective_message.reply_text.await_count == 3
+
+    @pytest.mark.asyncio
+    async def test_auto_request_fulfilled_by_jina_is_not_replayed(
+        self, ocr_service: MagicMock, update: MagicMock, context: MagicMock
+    ) -> None:
+        """Cloud fallback must have the same delivery safety as explicit Jina."""
+        update.effective_message.photo = [
+            MagicMock(spec=PhotoSize, file_id="photo-id", file_size=1024)
+        ]
+        update.effective_message.caption = "#auto"
+        telegram_file = MagicMock()
+        telegram_file.download_as_bytearray = AsyncMock(return_value=b"photo")
+        context.bot.get_file.return_value = telegram_file
+        processing = MagicMock()
+        processing.delete = AsyncMock()
+        update.effective_message.reply_text.side_effect = [processing, TimedOut(), None]
+        ocr_service.process_image.return_value = success_result(engine="jina")
+
+        with pytest.raises(Exception) as caught:
+            await DocumentOCRHandler(ocr_service).handle(update, context)
+
+        assert not is_retryable_error(caught.value)
+        assert "手动重发" in update.effective_message.reply_text.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_auto_request_with_failed_cloud_fallback_is_not_replayed(
+        self, ocr_service: MagicMock, update: MagicMock, context: MagicMock
+    ) -> None:
+        """An uncertain failed fallback may still have incurred hosted usage."""
+        update.effective_message.photo = [
+            MagicMock(spec=PhotoSize, file_id="photo-id", file_size=1024)
+        ]
+        update.effective_message.caption = "#auto"
+        telegram_file = MagicMock()
+        telegram_file.download_as_bytearray = AsyncMock(return_value=b"photo")
+        context.bot.get_file.return_value = telegram_file
+        processing = MagicMock()
+        processing.edit_text = AsyncMock()
+        update.effective_message.reply_text.return_value = processing
+        ocr_service.process_image.return_value = OCRProcessResult(
+            success=False,
+            error="cloud fallback failed",
+            retryable=True,
+            cloud_attempted=True,
+        )
+
+        with pytest.raises(Exception) as caught:
+            await DocumentOCRHandler(ocr_service).handle(update, context)
+
+        assert not is_retryable_error(caught.value)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("stage", ["download", "recognize", "processing", "delete"])
@@ -361,3 +416,27 @@ class TestDocumentOCRHandler:
         assert "✅ paddle" in status_text
         assert "❌ glm" in status_text
         assert "✅ qwen" in status_text
+        assert "仅显式选择" in status_text
+        assert "本地失败后兜底已启用" not in status_text
+
+    @pytest.mark.asyncio
+    async def test_ocr_status_shows_enabled_local_failure_fallback(
+        self,
+        ocr_service: MagicMock,
+        update: MagicMock,
+        context: MagicMock,
+    ) -> None:
+        """Show that the OCR service falls back to Jina after local failure."""
+        ocr_service.health.return_value = OCRHealthResponse(
+            status="ok",
+            ollama=True,
+            jina=JinaHealthStatus(configured=True, reachable=True, fallback_on_local_failure=True),
+            models=[OCRModelStatus(engine="paddle", name="paddle-model", available=True)],
+        )
+        handler = DocumentOCRHandler(ocr_service)
+
+        await handler.show_status(update, context)
+
+        status_text = update.effective_message.reply_text.call_args.args[0]
+        assert "本地失败后兜底已启用" in status_text
+        assert "仅显式选择" not in status_text
