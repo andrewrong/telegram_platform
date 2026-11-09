@@ -1,0 +1,9 @@
+# Optional override for `docker compose -f docker-compose.yml -f docker-compose.ocr.yml up`.
+# The OCR service runs separately on the Docker host.
+
+services:
+  telegram-bot:
+    environment:
+      OCR_SERVICE_URL: ${OCR_SERVICE_URL_DOCKER:-http://host.docker.internal:18100}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    # Pre-built image - use 'make build' to compile first
+    image: telegram-asr-bot:latest
+    container_name: telegram-asr-bot
+    restart: unless-stopped
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'          # Max 1 CPU core
+          memory: 256M         # Max 256MB RAM
+        reservations:
+          cpus: '0.25'         # Reserve 0.25 CPU
+          memory: 128M         # Reserve 128MB RAM
+
+    # Environment
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - ASR_SERVICE_URL=${ASR_SERVICE_URL_DOCKER:-http://host.docker.internal:28111}
+      - OCR_SERVICE_URL=${OCR_SERVICE_URL_DOCKER:-http://host.docker.internal:18100}
+
+    # Mount .env file for configuration
+    env_file:
+      - .env
+
+    # Mount logs and the durable update inbox for persistence
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+
+    # Network configuration
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    # Network (isolated)
+    networks:
+      - bot-network
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  bot-network:
+    driver: bridge
