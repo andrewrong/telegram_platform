@@ -1,6 +1,7 @@
 """Unit tests for media group cache manager."""
 
 import asyncio
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -288,3 +289,70 @@ class TestMediaGroupManager:
 
         # All caches should be cleared
         assert len(manager._caches) == 0
+
+
+class TestMediaGroupCacheLogsKeepIdsOut:
+    """The cache logs never carry a media group id or a chat id."""
+
+    GROUP_ID = "mg-7341"
+    CHAT_ID = 987654321
+
+    @staticmethod
+    def _message(chat_id: int) -> MagicMock:
+        message = MagicMock()
+        message.chat.id = chat_id
+        message.message_thread_id = None
+        return message
+
+    @pytest.mark.asyncio
+    async def test_no_record_names_group_or_chat_id(self, caplog):
+        """Add, process and close a group; no record shows either id."""
+        caplog.set_level(logging.DEBUG)
+        manager = MediaGroupManager(timeout_seconds=0.01)
+        process_callback = AsyncMock()
+        message = self._message(self.CHAT_ID)
+
+        for data in (b"image1", b"image2"):
+            await manager.add_image(
+                media_group_id=self.GROUP_ID,
+                image_data=data,
+                message=message,
+                process_callback=process_callback,
+            )
+        task = manager._caches[self.GROUP_ID].timer_task
+        await asyncio.wait([task])
+        manager.close()
+
+        assert caplog.records
+        for record in caplog.records:
+            text = record.getMessage()
+            assert self.GROUP_ID not in text
+            assert str(self.CHAT_ID) not in text
+        assert self.GROUP_ID not in caplog.text
+        assert str(self.CHAT_ID) not in caplog.text
+        process_callback.assert_called_once()
+        args = process_callback.call_args[0]
+        assert args[0] == self.GROUP_ID
+        assert args[1] == [b"image1", b"image2"]
+        assert args[2] == self.CHAT_ID
+
+    @pytest.mark.asyncio
+    async def test_failing_callback_logs_one_error_without_group_id(self, caplog):
+        """A raising callback gives one ERROR record without the group id."""
+        caplog.set_level(logging.DEBUG)
+        manager = MediaGroupManager(timeout_seconds=0.01)
+        process_callback = AsyncMock(side_effect=RuntimeError("boom"))
+
+        await manager.add_image(
+            media_group_id=self.GROUP_ID,
+            image_data=b"image1",
+            message=self._message(self.CHAT_ID),
+            process_callback=process_callback,
+        )
+        task = manager._caches[self.GROUP_ID].timer_task
+        await asyncio.wait([task])
+
+        errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+        assert len(errors) == 1
+        assert self.GROUP_ID not in errors[0].getMessage()
+        assert "boom" in errors[0].getMessage()

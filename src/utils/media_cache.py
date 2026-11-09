@@ -87,10 +87,7 @@ class MediaGroupManager:
 
         if is_first:
             # Create new cache entry
-            logger.info(
-                f"Creating new media group cache: {media_group_id}, "
-                f"chat_id={message.chat.id}, timeout={self.timeout_seconds}s"
-            )
+            logger.info(f"Creating new media group cache, timeout={self.timeout_seconds}s")
             cache = MediaGroupCache(
                 media_group_id=media_group_id,
                 chat_id=message.chat.id,
@@ -105,7 +102,7 @@ class MediaGroupManager:
             )
         else:
             cache = self._caches[media_group_id]
-            logger.debug(f"Adding image to existing media group: {media_group_id}")
+            logger.debug("Adding image to existing media group")
 
         # Add image to cache
         cache.images.append(image_data)
@@ -127,9 +124,9 @@ class MediaGroupManager:
             await asyncio.sleep(self.timeout_seconds)
             await self._process_group(media_group_id, process_callback)
         except asyncio.CancelledError:
-            logger.debug(f"Timer cancelled for media group: {media_group_id}")
+            logger.debug("Timer cancelled for media group")
         except Exception as e:
-            logger.exception(f"Error in timer callback for {media_group_id}: {e}")
+            logger.exception(f"Error in timer callback: {e}")
 
     async def _process_group(
         self,
@@ -144,17 +141,17 @@ class MediaGroupManager:
         """
         cache = self._caches.get(media_group_id)
         if not cache:
-            logger.warning(f"Cache not found for media group: {media_group_id}")
+            logger.warning("Cache not found for media group")
             return
 
         if cache.is_processing:
-            logger.debug(f"Media group {media_group_id} is already being processed")
+            logger.debug("Media group is already being processed")
             return
 
         cache.is_processing = True
 
         try:
-            logger.info(f"Processing media group {media_group_id} with {len(cache.images)} images")
+            logger.info(f"Processing media group with {len(cache.images)} images")
             await process_callback(
                 media_group_id,
                 cache.images,
@@ -163,7 +160,7 @@ class MediaGroupManager:
                 cache.context,
             )
         except Exception as e:
-            logger.exception(f"Error processing media group {media_group_id}: {e}")
+            logger.exception(f"Error processing media group: {e}")
         finally:
             self._cleanup(media_group_id)
 
@@ -176,7 +173,7 @@ class MediaGroupManager:
         cache = self._caches.pop(media_group_id, None)
         if cache and cache.timer_task and not cache.timer_task.done():
             cache.timer_task.cancel()
-            logger.debug(f"Cancelled timer for media group: {media_group_id}")
+            logger.debug("Cancelled timer for media group")
 
     def close(self) -> None:
         """Close the manager and cancel all pending timers."""
