@@ -302,17 +302,20 @@ class _FakeApp:
 async def _http_get(port: int) -> tuple[int, str]:
     import asyncio
 
-    reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    writer.write(b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n")
-    await writer.drain()
-    data = await reader.read()
-    writer.close()
+    reader, writer = await asyncio.wait_for(asyncio.open_connection("127.0.0.1", port), timeout=5)
+    try:
+        writer.write(b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n")
+        await asyncio.wait_for(writer.drain(), timeout=5)
+        data = await asyncio.wait_for(reader.read(), timeout=5)
+    finally:
+        writer.close()
     return _status_and_body(data)
 
 
 @pytest.mark.asyncio
 async def test_runner_serves_health_while_running_and_closes_after(tmp_path: Path) -> None:
     import asyncio
+    import socket
 
     ref: list = []
     seen: dict = {}
@@ -321,17 +324,18 @@ async def test_runner_serves_health_while_running_and_closes_after(tmp_path: Pat
         async def get_updates(self, **kwargs):
             server = runner._health_server
             if server is not None:
-                seen["port"] = server.sockets[0].getsockname()[1]
+                inet = next(sk for sk in server.sockets if sk.family == socket.AF_INET)
+                seen["port"] = inet.getsockname()[1]
                 seen["result"] = await _http_get(seen["port"])
             return await super().get_updates(**kwargs)
 
     runner = ReliableUpdateRunner(_FakeApp(Bot(ref, [[]])), tmp_path / "inbox.db", health_port=0)
     ref.append(runner)
-    await runner.run()
+    await asyncio.wait_for(runner.run(), timeout=10)
 
     assert seen.get("result") == (200, "ok")
     with pytest.raises(OSError):
-        await asyncio.open_connection("127.0.0.1", seen["port"])
+        await asyncio.wait_for(asyncio.open_connection("127.0.0.1", seen["port"]), timeout=5)
 
 
 @pytest.mark.asyncio
