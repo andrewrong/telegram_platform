@@ -16,6 +16,7 @@ from telegram.request import HTTPXRequest
 from src.bot.handlers.document import DocumentOCRHandler
 from src.bot.handlers.ingredient import IngredientHandler
 from src.bot.handlers.voice import VoiceHandler
+from src.bot.health import HEALTH_PORT
 from src.bot.reliable import ReliableUpdateRunner
 from src.config.settings import Settings
 from src.services.audio.asr import ASRService
@@ -205,6 +206,7 @@ class TelegramBot:
             self.application,
             database_path=Path(self.settings.update_store_path),
             worker_count=self.settings.update_worker_count,
+            health_port=HEALTH_PORT,
         )
         asyncio.run(runner.run())
 
