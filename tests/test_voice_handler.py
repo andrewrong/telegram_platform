@@ -1,5 +1,6 @@
 """Tests for voice message handler."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -384,3 +385,84 @@ class TestVoiceHandlerWithGroupFilter:
         # Assert - should process normally
         mock_context.bot.get_file.assert_called_once()
         handler.asr_service.process_audio.assert_called_once()
+
+
+SENSITIVE_VALUES = (
+    "-1009876543210",
+    "424242",
+    "secret_user_name",
+    "Secret Chat Title",
+    "secret_file_id",
+)
+
+
+def _logged_text(caplog: pytest.LogCaptureFixture) -> str:
+    return "\n".join(record.getMessage() for record in caplog.records)
+
+
+def _sensitive_message(kind: str) -> MagicMock:
+    update = MagicMock(spec=Update)
+    update.effective_user = MagicMock()
+    update.effective_user.id = 424242
+    update.effective_user.username = "secret_user_name"
+    message = MagicMock(spec=Message)
+    media = MagicMock()
+    media.file_id = "secret_file_id"
+    media.duration = 5
+    media.file_size = 1024
+    media.file_name = "a.mp3"
+    media.mime_type = "audio/mpeg"
+    setattr(message, kind, media)
+    chat = MagicMock(spec=Chat)
+    chat.id = -1009876543210
+    chat.title = "Secret Chat Title"
+    chat.username = "secret_user_name"
+    chat.type = "supergroup"
+    message.chat = chat
+    message.reply_text = AsyncMock()
+    update.effective_message = message
+    update.effective_chat = chat
+    return update
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["voice", "audio"])
+@pytest.mark.parametrize("filtered", [False, True])
+async def test_handlers_do_not_log_identifiers(
+    kind: str, filtered: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    asr = AsyncMock()
+    asr.process_audio = AsyncMock(
+        return_value=AudioProcessResult(success=True, text="hi", error="")
+    )
+    handler = VoiceHandler(
+        asr_service=asr, allowed_group_ids=[-1009876543210] if filtered else None
+    )
+    context = MagicMock(spec=ContextTypes.DEFAULT_TYPE)
+    context.bot = AsyncMock()
+    file = MagicMock(spec=File)
+    file.file_path = "x/test.oga"
+    file.download_as_bytearray = AsyncMock(return_value=bytearray(b"data"))
+    context.bot.get_file = AsyncMock(return_value=file)
+    update = _sensitive_message(kind)
+
+    if filtered:
+        # Also cover the rejected-chat path with a chat outside the allowed list.
+        other = VoiceHandler(asr_service=asr, allowed_group_ids=[-1])
+        await getattr(other, "handle" if kind == "voice" else "handle_audio")(update, context)
+    await getattr(handler, "handle" if kind == "voice" else "handle_audio")(update, context)
+
+    assert caplog.records
+    text = _logged_text(caplog)
+    for value in SENSITIVE_VALUES:
+        assert value not in text
+
+
+def test_constructor_does_not_log_allowed_group_ids(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+
+    VoiceHandler(asr_service=AsyncMock(), allowed_group_ids=[-1009876543210])
+
+    assert caplog.records
+    assert "1009876543210" not in _logged_text(caplog)

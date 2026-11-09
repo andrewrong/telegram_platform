@@ -188,8 +188,7 @@ class TelegramBot:
 
     async def _start_command(self, update, context) -> None:
         """Handle /start command."""
-        user = update.effective_user
-        logger.info(f"Start command from user_id={user.id if user else 'unknown'}")
+        logger.info("Start command received")
         await update.effective_message.reply_text(
             "👋 欢迎使用 Telegram 多媒体助手！\n"
             "发送图片、原图文件或 PDF，我会提取文字并返回 Markdown。\n"

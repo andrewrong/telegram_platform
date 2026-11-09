@@ -1,5 +1,6 @@
 """Unit tests for ingredient handler."""
 
+import logging
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
@@ -446,3 +447,57 @@ class TestIngredientHandler:
             # Should process images and analyze merged text
             mock_process.assert_called_once_with([b"img1", b"img2"])
             mock_analyzer.analyze_from_text.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_handler_logs_no_identifiers(
+    mock_analyzer, mock_ocr_service, mock_media_manager, mock_update, mock_context, caplog
+):
+    """Constructor and a handled photo log no chat, user, file, channel or topic id."""
+    caplog.set_level(logging.DEBUG)
+    mock_update.effective_user.username = "secret_user_name"
+    mock_update.effective_user.id = 424242
+    chat = mock_update.effective_message.chat
+    chat.id = -1009876543210
+    chat.title = "Secret Chat Title"
+    mock_update.effective_message.message_thread_id = 777001
+    photo = MagicMock(spec=PhotoSize)
+    photo.file_size = 1024
+    photo.file_id = "secret_file_id"
+    photo.width = 100
+    photo.height = 100
+    mock_update.effective_message.photo = [photo]
+    mock_update.effective_message.reply_text = AsyncMock()
+    mock_file = MagicMock()
+    mock_file.file_path = "p.jpg"
+    mock_file.download_as_bytearray = AsyncMock(return_value=b"img")
+    mock_context.bot.get_file = AsyncMock(return_value=mock_file)
+    ocr = MagicMock(success=True, text="配料：水", error="")
+    mock_ocr_service.process_image = AsyncMock(return_value=ocr)
+    mock_analyzer.analyze_from_image.return_value = "ok"
+    mock_analyzer.format_for_telegram.return_value = ("ok", [])
+
+    handler = IngredientHandler(
+        analyzer=mock_analyzer,
+        ocr_service=mock_ocr_service,
+        media_group_manager=mock_media_manager,
+        channel_id=-1009876543210,
+        topic_id=777001,
+    )
+    await handler.handle(mock_update, mock_context)
+    # A message from another chat and topic exercises the ignore paths.
+    chat.id = -1005550001111
+    await handler.handle(mock_update, mock_context)
+
+    assert caplog.records
+    text = "\n".join(record.getMessage() for record in caplog.records)
+    for value in (
+        "1009876543210",
+        "1005550001111",
+        "424242",
+        "secret_user_name",
+        "Secret Chat Title",
+        "secret_file_id",
+        "777001",
+    ):
+        assert value not in text

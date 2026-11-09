@@ -12,13 +12,17 @@ from pathlib import Path
 from telegram import Update
 from telegram.ext import Application, ApplicationHandlerStop
 
-from src.utils.retry import is_retryable_error, retry_after_seconds
+from src.utils.retry import RetryableJobError, is_retryable_error, retry_after_seconds
 
 logger = logging.getLogger(__name__)
 
 LEASE_SECONDS = 15 * 60
 RETRY_DELAYS_SECONDS = (2, 5, 15, 45, 120, 300)
 RETRY_DELAY_CAP_SECONDS = 15 * 60
+# attempts is incremented at claim: the 8th run is the last (7 retries, about 23 minutes).
+MAX_RETRY_ATTEMPTS = 8
+RETRY_NOTICE_TEXT = "⚠️ 处理暂时失败，将自动重试"
+GIVE_UP_NOTICE_TEXT = "❌ 处理失败，请稍后重新发送"
 # Telegram keeps the allowed_updates of the last getUpdates call made with this token,
 # even by another program. Ask for every type on each call so that such a call cannot
 # silently narrow what this bot receives.
@@ -239,13 +243,23 @@ class ReliableUpdateRunner:
                 except TimeoutError:
                     pass
                 continue
+            update: Update | None = None
             try:
                 update = Update.de_json(job.payload, self.application.bot)
                 await self._dispatch(update)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                if is_retryable_error(error):
+                if is_retryable_error(error) and job.attempts >= MAX_RETRY_ATTEMPTS:
+                    await self.store.fail(job.update_id, error)
+                    logger.error(
+                        "Update_id=%s given up after %s attempts: %s",
+                        job.update_id,
+                        job.attempts,
+                        error,
+                    )
+                    await self._notify(update, GIVE_UP_NOTICE_TEXT)
+                elif is_retryable_error(error):
                     delay = await self.store.retry(job, error)
                     logger.warning(
                         "Retrying update_id=%s after %.1fs (attempt=%s): %s",
@@ -254,12 +268,26 @@ class ReliableUpdateRunner:
                         job.attempts,
                         error,
                     )
+                    if job.attempts == 1 and _has_retryable_job_error(error):
+                        await self._notify(update, RETRY_NOTICE_TEXT)
                 else:
                     await self.store.fail(job.update_id, error)
                     logger.exception("Update_id=%s failed permanently", job.update_id)
             else:
                 await self.store.complete(job.update_id)
                 logger.info("Consumed update_id=%s with worker=%s", job.update_id, worker_index)
+
+    async def _notify(self, update: Update | None, text: str) -> None:
+        """Best-effort reply to the chat of the update; failures never affect the job."""
+        chat = update.effective_chat if update is not None else None
+        if chat is None:
+            return
+        try:
+            await self.application.bot.send_message(chat_id=chat.id, text=text)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Could not send job notice: %s", type(error).__name__)
 
     async def _dispatch(self, update: Update) -> None:
         """Run the normal PTB route selection but let errors reach the durable worker."""
@@ -279,3 +307,15 @@ class ReliableUpdateRunner:
                 except ApplicationHandlerStop:
                     return
                 break
+
+
+def _has_retryable_job_error(error: BaseException) -> bool:
+    """Whether a RetryableJobError is anywhere in the __cause__/__context__ chain."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        if isinstance(current, RetryableJobError):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
