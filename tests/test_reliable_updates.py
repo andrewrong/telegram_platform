@@ -214,7 +214,7 @@ async def test_other_retryable_error_sends_no_notice_and_failed_send_keeps_retry
 
 @pytest.mark.asyncio
 async def test_retryable_error_at_cap_fails_and_sends_final_reply(tmp_path: Path) -> None:
-    assert MAX_RETRY_ATTEMPTS == 100
+    assert MAX_RETRY_ATTEMPTS == 8
     bot = _RecordingBot()
     runner = _make_runner(tmp_path, RetryableJobError("asr down"), bot)
     try:

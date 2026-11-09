@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 LEASE_SECONDS = 15 * 60
 RETRY_DELAYS_SECONDS = (2, 5, 15, 45, 120, 300)
 RETRY_DELAY_CAP_SECONDS = 15 * 60
-# attempts is incremented at claim: the 100th run is the last (99 retries, about 23 hours).
-MAX_RETRY_ATTEMPTS = 100
+# attempts is incremented at claim: the 8th run is the last (7 retries, about 23 minutes).
+MAX_RETRY_ATTEMPTS = 8
 RETRY_NOTICE_TEXT = "⚠️ 处理暂时失败，将自动重试"
 GIVE_UP_NOTICE_TEXT = "❌ 处理失败，请稍后重新发送"
 # Telegram keeps the allowed_updates of the last getUpdates call made with this token,
