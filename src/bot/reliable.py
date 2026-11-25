@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import Application, ApplicationHandlerStop
 
 from src.bot.health import start_health_server
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 LEASE_SECONDS = 15 * 60
 RETRY_DELAYS_SECONDS = (2, 5, 15, 45, 120, 300)
 RETRY_DELAY_CAP_SECONDS = 15 * 60
+# A Conflict clears once the other getUpdates caller stops; backoff + one 30 s
+# long poll must stay under the health check's stale limit.
+CONFLICT_RETRY_SECONDS = 30
 # attempts is incremented at claim: the 8th run is the last (7 retries, about 23 minutes).
 MAX_RETRY_ATTEMPTS = 8
 RETRY_NOTICE_TEXT = "⚠️ 处理暂时失败，将自动重试"
@@ -203,6 +207,7 @@ class ReliableUpdateRunner:
         self.health_port = health_port
         self._health_server: asyncio.Server | None = None
         self.last_poll_success: float | None = None
+        self.consecutive_conflicts = 0
         self._started_at = time.monotonic()
 
     async def run(self) -> None:
@@ -239,12 +244,21 @@ class ReliableUpdateRunner:
                     allowed_updates=ALLOWED_UPDATES,
                 )
                 self.last_poll_success = time.monotonic()
+                self.consecutive_conflicts = 0
                 await self.store.ingest(updates)
                 if updates:
                     logger.info("Durably ingested %s Telegram update(s)", len(updates))
                     self._wake_workers.set()
             except asyncio.CancelledError:
                 raise
+            except Conflict:
+                self.consecutive_conflicts += 1
+                logger.warning(
+                    "Telegram getUpdates conflict (consecutive conflicts: %s); retrying in %ss",
+                    self.consecutive_conflicts,
+                    CONFLICT_RETRY_SECONDS,
+                )
+                await asyncio.sleep(CONFLICT_RETRY_SECONDS)
             except Exception as error:
                 if is_retryable_error(error):
                     logger.warning("Telegram polling temporarily failed; retrying: %s", error)
