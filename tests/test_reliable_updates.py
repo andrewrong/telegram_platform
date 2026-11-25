@@ -5,7 +5,7 @@ from pathlib import Path
 import httpx
 import pytest
 from telegram import Update
-from telegram.error import TimedOut
+from telegram.error import Conflict, TimedOut
 
 from src.bot.reliable import (
     ALLOWED_UPDATES,
@@ -379,3 +379,86 @@ async def test_last_success_recorded_only_after_successful_get_updates(tmp_path:
     await runner._poll_forever()
     runner.store.close()
     assert runner.last_poll_success is not None
+
+
+async def _poll_recording_sleeps(
+    runner: ReliableUpdateRunner, monkeypatch: pytest.MonkeyPatch
+) -> list[float]:
+    import src.bot.reliable as reliable
+
+    sleeps: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(reliable.asyncio, "sleep", record_sleep)
+    await runner._poll_forever()
+    runner.store.close()
+    return sleeps
+
+
+@pytest.mark.asyncio
+async def test_conflict_polling_backs_off_30_to_60_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.bot.health import STALE_AFTER_SECONDS
+    from src.bot.reliable import CONFLICT_RETRY_SECONDS
+
+    ref: list = []
+    bot = _FakeBot(ref, [Conflict("terminated by other getUpdates request"), []])
+    runner = ReliableUpdateRunner(_FakeApp(bot), tmp_path / "inbox.db")
+    ref.append(runner)
+
+    sleeps = await _poll_recording_sleeps(runner, monkeypatch)
+
+    assert sleeps == [30]
+    assert CONFLICT_RETRY_SECONDS == 30
+    assert CONFLICT_RETRY_SECONDS + 30 < STALE_AFTER_SECONDS
+    assert bot.outcomes == []  # the poll after the backoff happened
+    assert runner.last_poll_success is not None
+
+
+@pytest.mark.asyncio
+async def test_consecutive_conflicts_counted_and_reset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    ref: list = []
+    seen: list[int] = []
+
+    class Bot(_FakeBot):
+        async def get_updates(self, **kwargs):
+            seen.append(ref[0].consecutive_conflicts)
+            return await super().get_updates(**kwargs)
+
+    bot = Bot(ref, [Conflict("secret-token-url"), Conflict("secret-token-url"), []])
+    runner = ReliableUpdateRunner(_FakeApp(bot), tmp_path / "inbox.db")
+    ref.append(runner)
+    assert runner.consecutive_conflicts == 0
+
+    with caplog.at_level("WARNING"):
+        await _poll_recording_sleeps(runner, monkeypatch)
+
+    assert seen == [0, 1, 2]
+    assert runner.consecutive_conflicts == 0
+    messages = [r.getMessage() for r in caplog.records if "onflict" in r.getMessage()]
+    assert len(messages) == 2
+    assert "1" in messages[0] and "2" in messages[1]
+    assert all("secret-token-url" not in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_other_non_retryable_error_still_sleeps_cap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.bot.reliable import RETRY_DELAY_CAP_SECONDS
+
+    ref: list = []
+    runner = ReliableUpdateRunner(
+        _FakeApp(_FakeBot(ref, [ValueError("boom"), []])), tmp_path / "inbox.db"
+    )
+    ref.append(runner)
+
+    sleeps = await _poll_recording_sleeps(runner, monkeypatch)
+
+    assert sleeps == [RETRY_DELAY_CAP_SECONDS]
+    assert runner.consecutive_conflicts == 0
